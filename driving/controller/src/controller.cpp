@@ -216,9 +216,9 @@ void MPCController::controlLoop() {
   //cout << errors_.transpose() << endl;
 
   // shift controls and run MPC
-  Matrix<double, NUM_CONTROLS, 1> u_prev = controls_.col(0);
-  Matrix<double, NUM_STATES, Dynamic> s_pred(NUM_STATES, p_horizon + 1);
-  Matrix<double, NUM_STATES, 1> s;
+  VControl u_prev = controls_.col(0);
+  DVStates s_pred(NUM_STATES, p_horizon + 1);
+  VState s;
 
   controls_.block(0, 0, NUM_CONTROLS, p_horizon - 1) = controls_.block(0, 1, NUM_CONTROLS, p_horizon - 1);
 
@@ -269,6 +269,13 @@ void MPCController::controlLoop() {
 }
 
 // get current state of the car (really a delta state from desired state)
+//state_(0) ~x
+//state_(1) ~y
+//state_(2) ~yaw  meaning the heading direction of car wrt. traj?
+//state_(3) ~vx
+//state_(4) ~vy
+//state_(5) ~rate_yaw
+
 void MPCController::getState() {
   double imu_to_cg = DGC_PASSAT_IMU_TO_FA_DIST; //p_vs.param.imu_to_cg_dist;
   state_(0) = applanix_.smooth_x + cos(applanix_.yaw) * imu_to_cg;
@@ -337,8 +344,8 @@ void MPCController::getDesiredStates() {
 
 void MPCController::getThrottleTorque() {
   // integrate forward to see where velocity should be
-  Matrix<double, NUM_STATES, 1> s;
-  Matrix<double, NUM_CONTROLS, 1> err;
+  VState s;
+  VControl err;
 
   simulateEuler(state_, controls_.col(0), &s);
 
@@ -361,18 +368,18 @@ void MPCController::getThrottleTorque() {
 // model predictive control using LQR for optimization
 #define NUM_EXT_STATES (NUM_STATES+2*NUM_CONTROLS)
 
-void MPCController::mpcLQR(const Matrix<double, NUM_STATES, 1> &s0, const Matrix<double, NUM_CONTROLS, Dynamic> &u0,
-    const Matrix<double, NUM_STATES, Dynamic> &s_star, const Matrix<double, NUM_CONTROLS, 1> &u_prev, Matrix<double, NUM_CONTROLS, Dynamic> *u_out) {
-  Matrix<double, NUM_STATES, NUM_STATES> A[p_horizon];
+void MPCController::mpcLQR(const VState &s0, const DVControls &u0,
+    const DVStates &s_star, const VControl &u_prev, DVControls *u_out) {
+  SMStates A[p_horizon];
   Matrix<double, NUM_STATES, NUM_CONTROLS> B[p_horizon];
   Matrix<double, NUM_EXT_STATES, NUM_EXT_STATES> Ae, P, Q;
   Matrix<double, NUM_EXT_STATES, NUM_CONTROLS> Be;
   Matrix<double, NUM_CONTROLS, NUM_EXT_STATES> K[p_horizon];
-  Matrix<double, NUM_CONTROLS, 1> g[p_horizon], u_opt;
-  Matrix<double, NUM_STATES, Dynamic> s(NUM_STATES, p_horizon + 1);
+  VControl g[p_horizon], u_opt;
+  DVStates s(NUM_STATES, p_horizon + 1);
   Matrix<double, NUM_EXT_STATES, 1> s_opt, q, ds;
-  Matrix<double, NUM_STATES, 1> s_next;
-  Matrix<double, NUM_CONTROLS, NUM_CONTROLS> Z;
+  VState s_next;
+  SMControls Z;
   Matrix2d R;
 
   s.col(0) = s0;
@@ -384,9 +391,9 @@ void MPCController::mpcLQR(const Matrix<double, NUM_STATES, 1> &s0, const Matrix
 
   // initialize extended dynamics matrices
   Ae.setZero();
-  Ae.block(NUM_STATES + NUM_CONTROLS, NUM_STATES, NUM_CONTROLS, NUM_CONTROLS) = Matrix<double, NUM_CONTROLS, NUM_CONTROLS>::Identity();
+  Ae.block(NUM_STATES + NUM_CONTROLS, NUM_STATES, NUM_CONTROLS, NUM_CONTROLS) = SMControls::Identity();
   Be.setZero();
-  Be.block(NUM_STATES, 0, NUM_CONTROLS, NUM_CONTROLS) = Matrix<double, NUM_CONTROLS, NUM_CONTROLS>::Identity();
+  Be.block(NUM_STATES, 0, NUM_CONTROLS, NUM_CONTROLS) = SMControls::Identity();
 
   Q.setZero();
   Q.block(0, 0, NUM_STATES, NUM_STATES) = p_Q;
@@ -461,7 +468,7 @@ void MPCController::mpcLQR(const Matrix<double, NUM_STATES, 1> &s0, const Matrix
 #define EPSILON 1e-5
 
 // dynamics of the car (bicycle model with velocity/steering input)
-void MPCController::dynamics(const Matrix<double, NUM_STATES, 1> &s, const Matrix<double, NUM_CONTROLS, 1> &u_, Matrix<double, NUM_STATES, 1> *s_dot, Matrix<
+void MPCController::dynamics(const VState &s, const VControl &u_, VState *s_dot, Matrix<
     double, NUM_STATES, NUM_STATES> *A, Matrix<double, NUM_STATES, NUM_CONTROLS> *B) {
   double u = s(3), v = s(4), cos_th = cos(s(2)), sin_th = sin(s(2));
   double th_dot = s(5), u_dot = u_(0);
@@ -483,8 +490,8 @@ void MPCController::dynamics(const Matrix<double, NUM_STATES, 1> &s, const Matri
 
   // compute Jacobians (numerically) if desired
   if (A != 0) {
-    Matrix<double, NUM_STATES, 1> s2 = s;
-    Matrix<double, NUM_STATES, 1> s_dot1, s_dot2;
+    VState s2 = s;
+    VState s_dot1, s_dot2;
     for (int i = 0; i < NUM_STATES; i++) {
       s2(i) += EPSILON;
       dynamics(s2, u_, &s_dot1, 0, 0);
@@ -496,8 +503,8 @@ void MPCController::dynamics(const Matrix<double, NUM_STATES, 1> &s, const Matri
   }
 
   if (B != 0) {
-    Matrix<double, NUM_CONTROLS, 1> u2 = u_;
-    Matrix<double, NUM_STATES, 1> s_dot1, s_dot2;
+    VControl u2 = u_;
+    VState s_dot1, s_dot2;
     for (int i = 0; i < NUM_CONTROLS; i++) {
       u2(i) += EPSILON;
       dynamics(s, u2, &s_dot1, 0, 0);
@@ -509,23 +516,23 @@ void MPCController::dynamics(const Matrix<double, NUM_STATES, 1> &s, const Matri
   }
 }
 
-void MPCController::simulateEuler(const Matrix<double, NUM_STATES, 1> &s, const Matrix<double, NUM_CONTROLS, 1> &u, Matrix<double, NUM_STATES, 1> *s_next,
-    Matrix<double, NUM_STATES, NUM_STATES> *A, Matrix<double, NUM_STATES, NUM_CONTROLS> *B) {
-  Matrix<double, NUM_STATES, 1> s_dot;
+void MPCController::simulateEuler(const VState &s, const VControl &u, VState *s_next,
+    SMStates *A, Matrix<double, NUM_STATES, NUM_CONTROLS> *B) {
+  VState s_dot;
   dynamics(s, u, &s_dot, A, B);
   (*s_next) = s + s_dot / p_hertz;
 
   if (A) {
     (*A) /= p_hertz;
-    (*A) += Matrix<double, NUM_STATES, NUM_STATES>::Identity();
+    (*A) += SMStates::Identity();
   }
 
   if (B) (*B) /= p_hertz;
 }
 
-void MPCController::simulateRK4(const Matrix<double, NUM_STATES, 1> &s, const Matrix<double, NUM_CONTROLS, 1> &u, Matrix<double, NUM_STATES, 1> *s_next,
-    Matrix<double, NUM_STATES, NUM_STATES> *A, Matrix<double, NUM_STATES, NUM_CONTROLS> *B) {
-  Matrix<double, NUM_STATES, 1> k1, k2, k3, k4;
+void MPCController::simulateRK4(const VState &s, const VControl &u, VState *s_next,
+    SMStates *A, Matrix<double, NUM_STATES, NUM_CONTROLS> *B) {
+  VState k1, k2, k3, k4;
   double dt = 1 / p_hertz;
 
   dynamics(s, u, &k1);
@@ -536,8 +543,8 @@ void MPCController::simulateRK4(const Matrix<double, NUM_STATES, 1> &s, const Ma
 
   // compute Jacobians (numerically) if desired
   if (A != 0) {
-    Matrix<double, NUM_STATES, 1> s2 = s;
-    Matrix<double, NUM_STATES, 1> sn1, sn2;
+    VState s2 = s;
+    VState sn1, sn2;
     for (int i = 0; i < NUM_STATES; i++) {
       s2(i) += EPSILON;
       simulateRK4(s2, u, &sn1, 0, 0);
@@ -549,8 +556,8 @@ void MPCController::simulateRK4(const Matrix<double, NUM_STATES, 1> &s, const Ma
   }
 
   if (B != 0) {
-    Matrix<double, NUM_CONTROLS, 1> u2 = u;
-    Matrix<double, NUM_STATES, 1> sn1, sn2;
+    VControl u2 = u;
+    VState sn1, sn2;
     for (int i = 0; i < NUM_CONTROLS; i++) {
       u2(i) += EPSILON;
       simulateRK4(s, u2, &sn1, 0, 0);

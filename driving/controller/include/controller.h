@@ -80,22 +80,22 @@ private:
   void getDesiredStates();
   void getThrottleTorque();
 
-  void mpcLQR(const Eigen::Matrix<double, NUM_STATES, 1> &s0, const Eigen::Matrix<double, NUM_CONTROLS, Eigen::Dynamic> &u0, const Eigen::Matrix<double,
-      NUM_STATES, Eigen::Dynamic> &s_star, const Eigen::Matrix<double, NUM_CONTROLS, 1> &u_prev, Eigen::Matrix<double, NUM_CONTROLS, Eigen::Dynamic> *u_out);
+  void mpcLQR(const VState &s0, const DVControls &u0, const Eigen::Matrix<double,
+      NUM_STATES, Eigen::Dynamic> &s_star, const VControl &u_prev, DVControls *u_out);
 
-  void laneFollow(const Eigen::Matrix<double, NUM_STATES, 1> &s0, const Eigen::Matrix<double, NUM_STATES, 1> &s_star,
-      Eigen::Matrix<double, NUM_CONTROLS, 1> *u_out);
+  void laneFollow(const VState &s0, const VState &s_star,
+      VControl *u_out);
 
   void getThrottleTorqueOriginal();
 
-  void dynamics(const Eigen::Matrix<double, NUM_STATES, 1> &s, const Eigen::Matrix<double, NUM_CONTROLS, 1> &u, Eigen::Matrix<double, NUM_STATES, 1> *s_dot,
-      Eigen::Matrix<double, NUM_STATES, NUM_STATES> *A = 0, Eigen::Matrix<double, NUM_STATES, NUM_CONTROLS> *B = 0);
+  void dynamics(const VState &s, const VControl &u, VState *s_dot,
+      SMStates *A = 0, Eigen::Matrix<double, NUM_STATES, NUM_CONTROLS> *B = 0);
 
-  void simulateEuler(const Eigen::Matrix<double, NUM_STATES, 1> &s, const Eigen::Matrix<double, NUM_CONTROLS, 1> &u,
-      Eigen::Matrix<double, NUM_STATES, 1> *s_next, Eigen::Matrix<double, NUM_STATES, NUM_STATES> *A = 0, Eigen::Matrix<double, NUM_STATES, NUM_CONTROLS> *B = 0);
+  void simulateEuler(const VState &s, const VControl &u,
+      VState *s_next, SMStates *A = 0, Eigen::Matrix<double, NUM_STATES, NUM_CONTROLS> *B = 0);
 
-  void simulateRK4(const Eigen::Matrix<double, NUM_STATES, 1> &s, const Eigen::Matrix<double, NUM_CONTROLS, 1> &u,
-      Eigen::Matrix<double, NUM_STATES, 1> *s_next, Eigen::Matrix<double, NUM_STATES, NUM_STATES> *A = 0, Eigen::Matrix<double, NUM_STATES, NUM_CONTROLS> *B = 0);
+  void simulateRK4(const VState &s, const VControl &u,
+      VState *s_next, SMStates *A = 0, Eigen::Matrix<double, NUM_STATES, NUM_CONTROLS> *B = 0);
 
   double simulatorThrottle(double u, double v, double th_dot, double u_d, double del);
 
@@ -116,15 +116,21 @@ private:
 
   bool run_controller_;
 
-  Eigen::Matrix<double, NUM_STATES, 1> state_;
-  Eigen::Matrix<double, NUM_CONTROLS, Eigen::Dynamic> controls_;
-  Eigen::Matrix<double, NUM_STATES, Eigen::Dynamic> des_states_;
+  //V meaning vector , D meaning Dynamic OR multi vectors
+  typedef Eigen::Matrix<double, NUM_STATES, 1> VState;
+  typedef Eigen::Matrix<double, NUM_CONTROLS, 1> VControl;
+  typedef Eigen::Matrix<double, NUM_STATES, Eigen::Dynamic> DVStates;
+  typedef Eigen::Matrix<double, NUM_CONTROLS, Eigen::Dynamic> DVControls;
+
+  VState state_;
+  DVControls controls_;
+  DVStates des_states_;
   Eigen::Vector2d errors_;
 
-  Eigen::Matrix<double, NUM_CONTROLS, 1> throttle_torque_;
-  Eigen::Matrix<double, NUM_CONTROLS, 1> ctl_err_;
-  Eigen::Matrix<double, NUM_CONTROLS, 1> ctl_err_vel_;
-  Eigen::Matrix<double, NUM_CONTROLS, 1> ctl_err_int_;
+  VControl throttle_torque_;
+  VControl ctl_err_;
+  VControl ctl_err_vel_;
+  VControl ctl_err_int_;
 
   //MSKenv_t m_mosek_env;
 
@@ -137,9 +143,13 @@ private:
   int p_horizon;
   double p_hertz;
 
-  Eigen::Matrix<double, NUM_STATES, NUM_STATES> p_Q;
-  Eigen::Matrix<double, NUM_CONTROLS, NUM_CONTROLS> p_R;
-  Eigen::Matrix<double, NUM_CONTROLS, NUM_CONTROLS> p_R_delta;
+  // SM meanning square matrix
+  typedef Eigen::Matrix<double, NUM_STATES, NUM_STATES> SMStates;
+  typedef Eigen::Matrix<double, NUM_CONTROLS, NUM_CONTROLS> SMControls;
+
+  SMStates p_Q;
+  SMControls p_R;
+  SMControls p_R_delta;
 
   double p_q_lon, p_q_lat, p_q_theta, p_q_u, p_q_v, p_q_theta_dot;
   double p_r_udot, p_r_delta, p_rd_udot, p_rd_delta;
